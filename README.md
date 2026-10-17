@@ -8,18 +8,20 @@
 | 目录 | 内容 |
 | --- | --- |
 | [§ 二、功能介绍](#二功能介绍) | 两个功能怎么配、什么时候生效、怎么确认生效、边界 |
-| [§ 三、编译 · 安装 · 验证](#三编译--安装--验证) | 从源码到进游戏的全过程 |
+| [§ 三、编译 · 安装 · 验证](#三编译--安装--验证) | 从源码到进游戏的全过程，末尾是**打包分发**（`package.bat`） |
 | [§ 四、二次开发须知](#四二次开发须知) | 改代码前必读：结构、入口、钩子铁律、内存坑、git 清理、已知债务 |
 
-**本项目从 [`..\Karst`](../Karst) 裁剪而来**，只保留两个功能。Karst 里的
+**本项目从 Karst 项目裁剪而来**，只保留两个功能。Karst 里的
 ShowByArt、CountryArt、INI 热重载、C# 脚本系统与 `KarstPatcher\` 全部移除；
 连带着 C# 构建链、`refs\DynamicPatcher\`、脚本工作室、`tools\` 里的
 Python/Node 工具也都不在了。
 
 因此 **Kite 没有 C# 侧**：成品就是 `Kite.dll`（**37 KB**）+ 一个可选的 `kite.ini`。
-仓库里自己的代码只有 21 个文件（`src\` 12 + 根目录 9），余下 391 个是**完整的 YRpp 头文件副本**
+仓库里自己的代码只有 23 个文件（`src\` 12 + 根目录 10 + `tools\` 1），余下 391 个是**完整的 YRpp 头文件副本**
 （1.07 MB）—— 那部分一次性放好就不用再动，需要任何引擎类都直接 `#include`。
 需要的外部环境只有 Visual Studio（C++ x86 工具集）。
+
+打包分发给别人只需一条命令：`package.bat` → `dist\kite-<版本>\`，见 [§ 三.5](#5-打包分发)。
 
 ---
 
@@ -272,11 +274,119 @@ BuildCost: watching [General] BuildCost in the rules INI.
 | 有 `watching` 但没有 `BuildCost=...` 行 | `[General]` 里没这个键，或写在了别的小节下面 |
 | 侧边栏加载不出来 | 指向的 `sidecNN.mix` 文件不存在 |
 
+### 5. 打包分发
+
+一条命令：**双击 `package.bat`**，或在终端里：
+
+```powershell
+.\package.bat                 # 编译 + 自检 + 收集到 dist\kite-<版本>\
+.\package.bat -Zip            # 额外打一个 dist\kite-<版本>.zip
+.\package.bat -NoBuild        # 不重新编译，用现有的 Release\Kite.dll
+```
+
+它做三件事（`tools\package.ps1`）：
+
+1. **编译** `Release|x86`（自动找 MSBuild：PATH → vswhere → VS 安装目录）
+2. **hook 自检** —— 直接读 DLL 的 `.syhks00` 段，把 Syringe 钩子表打出来核对：
+   钩子数必须等于脚本里的 `$ExpectedHookCount`（当前 4）、每个 size 必须 ≥ 5 字节、
+   地址必须落在 `gamemd.exe` 区间，否则**拒绝打包**。
+   这就是"改了钩子忘了核对字节数"的那道防线（替代 Karst 的 `tools\hookcheck.py`）
+3. **收集**要分发的文件到 `dist\kite-<版本>\`
+
+目录名里的 `<版本>` 取自 `src\Version.h`。**改版本时三处一起改**：`src\Version.h`、
+`Kite.rc` 的 `FILEVERSION/PRODUCTVERSION`、以及 `Kite.rc` 里的字符串版本
+（打包脚本只读 `Version.h`，另外两处是给文件属性面板和安装说明用的）。
+
+一次完整运行（实测）：
+
+```text
+==> Kite 0.1.0 打包
+    MSBuild: D:\...\MSBuild\Current\Bin\MSBuild.exe
+==> 编译 Release|x86
+  Kite.vcxproj -> E:\_game\RA2\kite\Release\Kite.dll
+==> hook 自检
+
+    address     size  hook
+    0x005350D3     7  Kite_SidebarMix_CountryMix
+    0x007146B3     6  Kite_BuildCost_CostOverride
+    0x007CD810     9  Kite_EntryPoint
+    0x0055D360     5  Kite_MainLoop
+
+    hook 自检通过：4 个钩子，全部 >= 5 字节。
+==> 收集分发文件 -> E:\_game\RA2\kite\dist\kite-0.1.0
+    Kite.dll      （必需）
+    kite.ini      （可选，模板：DebugLog / LogLevel / Enabled）
+    安装说明.txt  （给最终用户的步骤与排查）
+    压缩包: E:\_game\RA2\kite\dist\kite-0.1.0.zip
+
+打包完成。分发这个目录里的内容即可：
+  Kite.dll           37,376 B
+  kite.ini            1,368 B
+  安装说明.txt            2,266 B
+```
+
+> 双击运行时，窗口在结束时停在 `Press any key`，结果不会一闪而过。
+
+想绕开脚本手工做也行，等价于：
+
+```powershell
+msbuild Kite.sln /p:Configuration=Release /p:Platform=x86
+# 然后自己把 Release\Kite.dll（+ 可选 kite.ini）拷进一个空目录
+```
+
+但这样就跳过了 hook 自检，**不建议** —— 那个自检是唯一能在发包前发现
+"某个钩子 size 写小了"的环节。
+
+#### 要分发什么
+
+`dist\kite-<版本>\` 里就三样，整个目录丢给对方即可：
+
+| 文件 | 必需？ | 说明 |
+| --- | --- | --- |
+| `Kite.dll` | **必需** | 唯一需要进游戏目录的运行文件 |
+| `kite.ini` | 可选 | 只有 3 个键（`Enabled` / `LogLevel` / `DebugLog`）。不带也能跑，带上方便对方排错时改 `DebugLog=yes` |
+| `安装说明.txt` | 建议 | 打包时自动生成：装哪、要先有 Syringe/Ares、两个功能怎么写配置、怎么确认生效、常见故障 |
+
+**不要分发**：`src\`、`YRpp\`、`Kite.sln/.vcxproj`、`Release\` 里的
+`Kite.lib/.exp/.pdb`、`dist\` 之外的构建中间产物。这些对使用者没有意义，
+`.pdb` 还有 2 MB。
+
+接收方的前提条件（`安装说明.txt` 里也写了）：
+
+* **必须先装 Syringe / Ares** —— Kite 靠 Syringe 注入，自己不能独立启动。
+  往一个没有 Syringe 的游戏目录里放 `Kite.dll` 不会有任何效果，也**不会报错**
+* `gamemd.exe` 与 `Syringe.exe` 都要**以管理员身份**运行
+* 只支持 YR **1.001** 的 `gamemd.exe`
+
+对方是**玩家**（用你的 MOD）：`rulesmd.ini` 的两处键随 MOD 一起发，他只需要 `Kite.dll`。
+对方是**MOD 作者**：把 README 的 [§ 二](#二功能介绍) 或 `安装说明.txt` 给他，告诉他键写在哪个段。
+
+#### 首发 / 发新版本的流程
+
+1. **改版本号**三处（`src\Version.h` + `Kite.rc` 的 `FILEVERSION` / 字符串版本），见上
+2. `.\package.bat -Zip`
+3. 把 `dist\kite-<版本>\` **整个目录**（或 `kite-<版本>.zip`，当前约 19.5 KB）交给对方；
+   公开分发就挂到 GitHub 的 **Release** 里 —— 仓库里不放二进制（`Release/`、`dist/` 都被忽略）
+4. 让对方照 `安装说明.txt` 做：`Kite.dll` 进游戏目录 →（可选）`kite.ini` 同目录 →
+   用 Syringe/Ares 以管理员启动
+
+实测的交付物大小（`kite-0.1.0`）：
+
+| 文件 | 大小 |
+| --- | --- |
+| `Kite.dll` | 37,376 B |
+| `kite.ini` | 1,368 B |
+| `安装说明.txt` | 2,266 B |
+| `kite-0.1.0.zip`（`-Zip`） | 19,550 B |
+
+> `dist\` 已在 `.gitignore` 里，打包产物不进仓库；仓库里**没有**编译好的 DLL，
+> 所以每次分发都要在本地跑一次 `package.bat`。
+
 ---
 
 ## 四、二次开发须知
 
-### 1. 文件清单（412 个文件 / 1.16 MB，其中 391 个是 YRpp）
+### 1. 文件清单（414 个文件 / 1.18 MB，其中 391 个是 YRpp）
 
 `Kite.vcxproj` 里登记的文件就是**全部**要编译的东西（新增文件必须也加进去）：
 
@@ -285,21 +395,24 @@ kite\
 ├─ Kite.sln / Kite.vcxproj    C++ 工程（Debug|x86 / Release|x86）
 ├─ Kite.rc / resource.h       版本资源（公司名、版本号）
 ├─ kite.ini                   ← 要复制到游戏目录（可省略）
+├─ package.bat                ★ 打包：编译 + hook 自检 + 收集到 dist\（见 §3.5）
 ├─ .editorconfig / .gitignore / .gitattributes
 ├─ README.md                  本文件
+├─ tools\package.ps1          package.bat 的实际逻辑（PE 钩子表解析也在这里）
 ├─ YRpp\                      引擎头文件（**完整**副本，391 个文件 / 1.07 MB）见 §4.7
-└─ src\                       ★ 唯一要改的地方（12 个文件 / 50 KB，约 1300 行）
-   ├─ dllmain.cpp             DllMain + 全部 4 个 DEFINE_HOOK（钩子清单就在文件开头）
-   ├─ Kite.h/.cpp             主对象：生命周期、kite.ini 读取、每帧回调
-   ├─ Version.h               版本号集中定义
-   ├─ Core\Log.h/.cpp         日志（调试输出 + 可选 kite.log）
-   ├─ Core\MemorySafety       引擎指针的安全读取
-   └─ Ext\                    ★ 功能在这里
-      ├─ SidebarMix\          功能一：按国家侧边栏
-      └─ BuildCost\           功能二：统一造价
+├─ src\                       ★ 唯一要改的地方（12 个文件 / 50 KB，约 1300 行）
+│  ├─ dllmain.cpp             DllMain + 全部 4 个 DEFINE_HOOK（钩子清单就在文件开头）
+│  ├─ Kite.h/.cpp             主对象：生命周期、kite.ini 读取、每帧回调
+│  ├─ Version.h               版本号集中定义（打包脚本从这里读）
+│  ├─ Core\Log.h/.cpp         日志（调试输出 + 可选 kite.log）
+│  ├─ Core\MemorySafety       引擎指针的安全读取
+│  └─ Ext\                    ★ 功能在这里
+│     ├─ SidebarMix\          功能一：按国家侧边栏
+│     └─ BuildCost\           功能二：统一造价
+└─ dist\                      打包产物（不进 git）
 ```
 
-`Release\` / `Debug\` 是产物，不进 git。
+`Release\` / `Debug\` / `dist\` 都是产物，不进 git。
 
 ### 2. 环境依赖
 
@@ -401,7 +514,7 @@ YRpp 用两种宏绑定引擎全局，行为完全不同（完整说明见 `src\
 `YRpp\` 是一份**完整的** YRpp 头文件副本：391 个文件 / 1.07 MB，包含每个引擎类一个头、
 `YRPP.h`、上游原版的 `StaticInits.cpp`、`Examples\`、`Blitters\`、`FileFormats\`。
 
-来源是 `..\Karst\YRpp`（再往上来自工作区的 `October Revolution` 项目），**不是** git 子模块。
+来源是 Karst 项目里那份 YRpp 副本（再往上来自 `October Revolution` 项目），**不是** git 子模块。
 
 完整保留是刻意的：想用哪个引擎类（如 `BuildingTypeClass`、`AnimClass`）直接
 `#include <BuildingTypeClass.h>` 就行，不用去别处找头文件。这份文件夹**一次性放好就不用再动**，
@@ -422,28 +535,30 @@ YRpp 用两种宏绑定引擎全局，行为完全不同（完整说明见 `src\
 `.gitignore` 已经写好并覆盖了所有产物：
 
 ```
-Debug/  Release/  *.obj *.lib *.exp *.pdb  /Kite.dll  /kite.log  .vs/  ...
+Debug/  Release/  dist/  *.obj *.lib *.exp *.pdb  /Kite.dll  /kite.log  .vs/  ...
 ```
 
-所以直接提交即可，**不要**把 `Release\Kite.dll` 提交进去（成品通过 Release 页或游戏目录分发）。
+所以直接提交即可，**不要**把 `Release\Kite.dll` 或 `dist\` 提交进去
+（成品通过 GitHub Release 页分发，见 [§ 三.5](#5-打包分发)）。
 
 ```powershell
 cd E:\_game\RA2\kite
-git init
 git add -A
-git status --short      # 应该只有 412 个文件，没有 obj/pdb/Release
-git commit -m "Kite 0.1.0: per-country sidebar MIX + uniform BuildCost"
+git status --short      # 应该只有 414 个文件，没有 obj/pdb/Release/dist
+git commit -m "add packaging script"
+git push
 ```
 
-仓库里应该只有：`src\`（12）、`YRpp\`（391）、根目录 9 个（工程文件、`kite.ini`、本文件、git/editor 配置）。
+仓库里应该只有：`src\`（12）、`YRpp\`（391）、`tools\`（1）、根目录 10 个
+（工程文件、`package.bat`、`kite.ini`、本文件、git/editor 配置）。
 
 ### 9. 已知债务（接手后建议先处理）
 
 | 债务 | 说明 |
 | --- | --- |
 | **两个功能未在 Kite 侧实机复验** | 代码逻辑继承自 Karst（那边验过），Kite 只做了编译 + 32 位 `LoadLibrary`/`FreeLibrary` 验证。第一次进游戏请按 §3.3 核对日志 |
-| **没有 hook 校验工具** | Karst 有 `tools\hookcheck.py` / `hookconflict.py`（查大小与 Ares 冲突）。为了轻量没带过来，所以**改钩子后必须人工核对字节数与指令边界**，必要时用 `dumpbin /all Release\Kite.dll` 看 `.syhks00` 段里的地址/大小 |
-| **没有 smoke test** | 同理，Karst 有 `tools\smoke_test.cpp`。当前替代办法：用 32 位 PowerShell 的 `LoadLibraryW`/`FreeLibrary` 走一遍 `DllMain` |
+| **hook 校验只覆盖"大小/数量/地址区间"** | `tools\package.ps1` 打包时会读 DLL 的钩子表做自检（替代 Karst 的 `hookcheck.py`），但它**不检查**目标地址处的指令边界，也不检查与 Ares/Phobos/Kratos 的地址冲突 —— 那两件事只能人工核对，改钩子时请对着反汇编确认 |
+| **没有 smoke test** | Karst 有 `tools\smoke_test.cpp`。当前替代办法：用 32 位 PowerShell 的 `LoadLibraryW`/`FreeLibrary` 走一遍 `DllMain` |
 | **只有 2 个功能** | 这是设计目标，不是缺陷。要加功能见 §4.5 |
 
 ### 10. 一页速查
@@ -453,9 +568,13 @@ git commit -m "Kite 0.1.0: per-country sidebar MIX + uniform BuildCost"
 msbuild Kite.sln /p:Configuration=Release /p:Platform=x86
 # 产物 -> Release\Kite.dll
 
+# 打包分发（编译 + hook 自检 + 收集到 dist\kite-<版本>\）
+.\package.bat
+#   ... 加 -Zip 打 zip，加 -NoBuild 跳过编译
+
 # 部署（手工版）
-#   Release\Kite.dll  ->  <游戏目录>\Kite.dll
-#   kite.ini          ->  <游戏目录>\kite.ini      (可选)
+#   dist\kite-<版本>\Kite.dll  ->  <游戏目录>\Kite.dll
+#   dist\kite-<版本>\kite.ini  ->  <游戏目录>\kite.ini      (可选)
 
 # 启动测试（两个 exe 都要管理员）
 #   Syringe.exe "gamemd.exe"
@@ -464,7 +583,7 @@ msbuild Kite.sln /p:Configuration=Release /p:Platform=x86
 #   <游戏目录>\kite.log        （需 kite.ini: DebugLog=yes）
 #   或 DebugView 里搜 "Kite:"
 
-# 核对钩子表（地址 / 大小 / 函数名）
+# 核对钩子表（打包时自动做；手工版）
 dumpbin /exports Release\Kite.dll
 ```
 

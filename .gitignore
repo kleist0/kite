@@ -30,6 +30,11 @@ Release/
 /kite.log
 /kite.log.*
 
+# --- packaging -------------------------------------------------------------
+# tools\package.ps1 builds this: dist\kite-<version>\ plus an optional zip.
+# A distribution is a release artifact, not source.
+dist/
+
 # --- editor / OS litter ----------------------------------------------------
 .vs/
 .vscode/

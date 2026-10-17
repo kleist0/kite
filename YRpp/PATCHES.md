@@ -1,8 +1,8 @@
 # YRpp patches applied to this copy
 
-This folder is a **complete, unmodified-in-scope copy** of `..\Karst\YRpp`, which
-in turn is a copy of the YRpp headers that ship with the `October Revolution`
-project in this workspace. It is not an upstream YRpp checkout and it is not a
+This folder is a **complete, unmodified-in-scope copy** of the YRpp shipped with
+the Karst project, which in turn is a copy of the YRpp headers that come with the
+`October Revolution` project. It is not an upstream YRpp checkout and it is not a
 git submodule here.
 
 It is kept **complete** (every engine class header, `YRPP.h`, `StaticInits.cpp`,
